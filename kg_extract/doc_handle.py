@@ -1,9 +1,14 @@
 from docx import Document
+from pptx import Presentation
 from abc import abstractmethod
 import pandas as pd
 import numpy as np
 import re
 import zipfile
+import win32com
+import win32com.client
+import os
+import platform
 
 
 def Doctable(ls, row, column):
@@ -113,6 +118,54 @@ class BaseDocHandle(object):
     @abstractmethod
     def get_proper_nouns(self):
         pass
+
+
+class BasePptxHandle(object):
+    def __init__(self, path):
+        if platform.platform().startswith("Windows"):
+            self.pwd = os.getcwd() + "\\"
+        else:
+            self.pwd = ''
+        self.path = path
+
+    def get_pptx_structure(self):
+        prs = Presentation(self.pwd + self.path)
+
+        slide = dict()
+        for shape_num, shape in enumerate(prs.slides[9].shapes):
+            data = dict()
+            if shape.has_text_frame:
+                data['type'] = 'text'
+                content = []
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        content.append([run.text, run.font.size])
+                data['content'] = content
+            elif 'picture' in str(shape):
+                data['type'] = 'image'
+                data['content'] = shape.image.blob
+            elif shape.has_table:
+                data['type'] = 'table'
+                ls = []
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        temp = []
+                        for paragraph in cell.text_frame.paragraphs:
+                            temp.append(paragraph.text)
+                        ls.append('\n'.join(temp))
+                data['content'] = Doctable(ls, len(shape.table.rows), len(shape.table.rows[0].cells))
+            else:
+                continue
+            data['shape_num'] = shape_num
+            slide['shape_num_' + str(shape_num)] = data
+        return slide
+
+    def get_pptx_images(self, dstpath):
+        application = win32com.client.Dispatch("PowerPoint.Application")
+        presentation = application.Presentations.Open(self.pwd + self.path, WithWindow=False)
+        for slide in presentation.Slides:
+            slide.Export(self.pwd + dstpath, "JPG")
+        application.Quit()
 
 
 class RuDocHandle(BaseDocHandle):
