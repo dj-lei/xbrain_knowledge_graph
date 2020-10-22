@@ -1,7 +1,6 @@
 import re
 import os
 import win32com
-import win32com.client
 import platform
 from docx.document import Document
 from docx.oxml.table import CT_Tbl
@@ -26,12 +25,6 @@ def get_image_with_rel(doc, rid):
 
 
 def iter_block_items(parent):
-    """
-    Yield each paragraph and table child within *parent*, in document order.
-    Each returned value is an instance of either Table or Paragraph. *parent*
-    would most commonly be a reference to a main Document object, but
-    also works for a _Cell object, which itself can contain paragraphs and tables.
-    """
     if isinstance(parent, Document):
         parent_elm = parent.element.body
     elif isinstance(parent, _Cell):
@@ -44,11 +37,6 @@ def iter_block_items(parent):
             yield Paragraph(child, parent)
         elif isinstance(child, CT_Tbl):
             yield Table(child, parent)
-            # table = Table(child, parent)
-            # for row in table.rows:
-            #     for cell in row.cells:
-            #         for paragraph in cell.paragraphs:
-            #             yield paragraph
 
 
 def doctable(ls, row, column):
@@ -70,7 +58,7 @@ def genarate_table(table):
     return doctable(ls, len(table.rows), len(table.rows[0].cells))
 
 
-class BaseDocHandle(object):
+class BaseDocxHandle(object):
 
     def __init__(self, path):
         self.path = path
@@ -79,57 +67,37 @@ class BaseDocHandle(object):
         # with open('kg_extract/google-10000-english-usa-no-swears.txt', 'r') as f:
         #     self.common_words = [token.strip() for token in f]
 
-    def get_proper_nouns_csv(self):
-        self.proper_nouns = set(pd.read_csv('proper_nouns.csv')['proper_nouns_name'].values)
-
     def get_docx_structure(self):
-        document = self.document
-        final = dict()
-        final['doc_name'] = self.document.core_properties.title
-
-        result = []
-        for para in iter_block_items(document):
-            data = dict()
+        tmp = []
+        for para in iter_block_items(self.document):
             style_name = para.style.name
 
             if 'docx.table.Table' in str(para):
                 table = genarate_table(para)
                 if len(table) < 1:
                     continue
-                data['type'] = 'table'
-                data['style'] = style_name
-                data['content'] = table
-                result.append(data)
+                tmp.append({'type': 'table', 'style': style_name, 'content': table})
                 continue
 
             if 'imagedata' in para._p.xml:
                 rid = re.findall('imagedata r:id=(.*?) ', para._p.xml)[0].replace('"', '')
-                data['type'] = 'image'
-                data['style'] = style_name
-                data['content'] = get_image_with_rel(document, rid)
-                result.append(data)
+                tmp.append({'type': 'image', 'style': style_name, 'content': get_image_with_rel(self.document, rid)})
                 continue
 
             doc = para.text.strip()
             if doc in ['', '\n']:
                 continue
-            data['type'] = 'text'
             if style_name in ['List abc double line', 'List number single line']:
-                data['style'] = 'List Bullet'
-            else:
-                data['style'] = style_name
-            data['content'] = doc
-            result.append(data)
-        final['content'] = result
-        return final
+                style_name = 'List Bullet'
+            tmp.append({'type': 'text', 'style': style_name, 'content': doc})
+        return {'name': self.document.core_properties.title, 'content': tmp}
 
     def get_catalog(self):
         data = self.get_docx_structure()
         prev_level = 0
         content = [0 for _ in range(0, 10)]
         count = [0 for _ in range(0, 10)]
-        a = []
-        b = []
+        tmp = []
         for elm in data['content']:
             if 'Heading ' in elm['style'].strip():
                 current_level = int(elm['style'].strip().split(' ')[1])
@@ -147,25 +115,24 @@ class BaseDocHandle(object):
                     count[current_level - 1] += 1
                     content[current_level:] = [0 for _ in range(current_level, 10)]
                     count[current_level:] = [0 for _ in range(current_level, 10)]
-                a.append('.'.join([str(v) for v in count if v != 0]))
-                b.append(' '.join([str(v) for v in content if v != 0]))
-        return pd.DataFrame(zip(a, b), columns=['symbol', 'content'])
+                tmp.append({'chapter': '.'.join([str(v) for v in count if v != 0]), 'title': [str(v) for v in content if v != 0][-1], 'path_content':
+                            ' '.join([str(v) for v in content if v != 0])})
+        return {'name': self.document.core_properties.title, 'catalog': tmp}
 
     def recovery_docx(self):
         data = self.get_docx_structure()
         catalog = self.get_catalog()
 
         document = docx.Document()
-        document.add_heading(data['doc_name'], 0)
+        document.add_heading(data['name'], 0)
         count = 0
 
         for elm in data['content']:
             if elm['type'] == 'text':
                 if 'Heading ' in elm['style']:
-                    run = document.add_heading().add_run(catalog['symbol'][count] + ' ' + elm['content'])
+                    run = document.add_heading().add_run(catalog['catalog'][count]['chapter'] + ' ' + elm['content'])
                     font = run.font
-                    font.name = 'Arial'
-                    font.size = Pt(20 - int(elm['style'].split(' ')[1]) * 2)
+                    font.size = Pt(22 - int(elm['style'].split(' ')[1]) * 2)
                     count += 1
                 else:
                     if 'List' in elm['style']:
@@ -173,8 +140,8 @@ class BaseDocHandle(object):
                     else:
                         run = document.add_paragraph().add_run(elm['content'])
                     font = run.font
-                    font.name = 'Arial'
                     font.size = Pt(12)
+                font.name = 'Arial'
 
             if elm['type'] == 'image':
                 pImage = Image.open(BytesIO(bytes(elm['content'])))
@@ -253,14 +220,6 @@ class BaseDocHandle(object):
         data = data.reset_index(drop=True)
         return data
 
-    @abstractmethod
-    def cut_special_symbols_and_filter_rules(self, word):
-        pass
-
-    @abstractmethod
-    def get_proper_nouns(self):
-        pass
-
 
 class BasePptxHandle(object):
     def __init__(self, path):
@@ -272,9 +231,9 @@ class BasePptxHandle(object):
 
     def get_pptx_structure(self):
         prs = Presentation(self.pwd + self.path)
-        result = dict()
+        tmp = []
         for slide_num, slide_s in enumerate(prs.slides):
-            slide = dict()
+            slide = []
             for shape_num, shape in enumerate(slide_s.shapes):
                 data = dict()
                 if shape.has_text_frame:
@@ -299,19 +258,20 @@ class BasePptxHandle(object):
                     data['content'] = doctable(ls, len(shape.table.rows), len(shape.table.rows[0].cells))
                 else:
                     continue
-                slide['shape_num_' + str(shape_num)] = data
-            result['slide_num_' + str(slide_num)] = slide
-        return result
+                slide.append(data)
+            tmp.append({'page': slide_num, 'slide': slide})
+        return {'name': prs.core_properties.title, 'slides': tmp}
 
-    def get_pptx_images(self, dstpath):
+    def export_pptx_images(self):
         application = win32com.client.Dispatch("PowerPoint.Application")
         presentation = application.Presentations.Open(self.pwd + self.path, WithWindow=False)
         for slide in presentation.Slides:
-            slide.Export(self.pwd + dstpath, "JPG")
+            slide.Export(self.pwd + r"tmp/tmp", "JPG")
+            # other handle
         application.Quit()
 
 
-class RuDocHandle(BaseDocHandle):
+class RuDocHandle(BaseDocxHandle):
 
     def __init__(self, path):
         super(RuDocHandle, self).__init__(path)

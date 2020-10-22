@@ -1,7 +1,6 @@
-import clang.cindex
 from clang.cindex import *
 import platform
-import pandas as pd
+import re
 
 
 class BaseCodeHandle(object):
@@ -20,7 +19,12 @@ class CPPCodeHandle(BaseCodeHandle):
 
     def get_header_file_architecture(self, file_path):
         tu = self.index.parse(file_path, ['-x', 'c++'])
-        data = []
-        for i in tu.cursor.walk_preorder():
-            data.append((i.kind, i.spelling, i.location, i.raw_comment))
-        return pd.DataFrame(data,columns=['kind', 'spelling', 'location', 'raw_comment'])
+        tmp = []
+        for cursor in tu.cursor.walk_preorder():
+            location = dict()
+            location['source'], location['line'], location['column'] = re.findall('file (.*?), line (\d+), column (\d+)', str(cursor.location))[0]
+            raw_comment = re.sub("[\*\/\\r\\n]", '', str(cursor.raw_comment)).strip().replace('  ', ' ')
+            data = {'kind': cursor.kind, 'spelling': cursor.spelling, 'location': location, 'raw_comment': raw_comment}
+            tmp.append(data)
+        result = {'name': file_path.split('/')[-1], 'cursors': tmp}
+        return result
