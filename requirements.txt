@@ -1,0 +1,12 @@
+python_pptx==0.6.18
+pandas==1.1.2
+elasticsearch==7.9.1
+clang==11.0
+opencv_python==4.4.0.44
+easyocr==1.1.9
+numpy==1.19.2
+pywin32==227
+spacy==2.3.2
+python_docx==0.8.10
+docx==0.2.4
+Pillow==8.0.1
