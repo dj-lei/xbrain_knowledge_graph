@@ -64,7 +64,7 @@ class BaseDocxHandle(object):
         self.path = path
         self.proper_nouns = set()
         self.document = docx.Document(self.path)
-        # with open('kg_extract/google-10000-english-usa-no-swears.txt', 'r') as f:
+        # with open('extract/google-10000-english-usa-no-swears.txt', 'r') as f:
         #     self.common_words = [token.strip() for token in f]
 
     def get_docx_structure(self):
